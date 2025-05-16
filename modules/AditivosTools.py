@@ -52,6 +52,12 @@ class AditivosTools(object):
                 self.driver.get(link)
                 uCE(self.driver, "return document.readyState == 'complete'")
 
+                description = self.extract_description_from_id('descripcion-del-aditivo') or self.extract_description_from_id('descripcion')
+                uses = self.extract_description_from_id('usos-del-aditivo') or self.extract_description_from_id('usos-alimentarios')
+                sideEffects = self.extract_description_from_id('efectos-secundarios') or self.extract_description_from_id('usos-alimentarios')
+
+                # Añadir la descripción y efectos secundarios al diccionario del aditivo
+
                 # Intentar extraer tabla química
                 chem_table = exec_js("return document.getElementsByClassName('quimica').length > 0 ? document.getElementsByClassName('quimica')[0] : null")
                 alt_names = {'es': [], 'en': []}
@@ -78,6 +84,9 @@ class AditivosTools(object):
                 additives.append({
                     'code': code,
                     'name': name,
+                    'description': description,
+                    'uses': uses,
+                    'sideEffects': sideEffects,
                     'toxicity': toxicity,
                     'alt_names': alt_names
                 })
@@ -95,6 +104,25 @@ class AditivosTools(object):
 
         return additives
 
+    def extract_description_from_id(self, id_selector: str) -> str:
+        description = []
+        try:
+            desc_title = self.driver.find_element(By.ID, id_selector)
+            next_elem = desc_title
+            while True:
+                next_elem = next_elem.find_element(By.XPATH, 'following-sibling::*[1]')
+                tag = next_elem.tag_name.lower()
+                if tag == 'p':
+                    description.append(next_elem.text.strip())
+                elif tag == 'ul':
+                    for li in next_elem.find_elements(By.TAG_NAME, 'li'):
+                        description.append(li.text.strip())
+                else:
+                    break
+        except Exception:
+            pass
+        return "\n".join(description)
+
     def save_to_db(self, additives, db_path='additives.db'):
         console_log(f"Saving {len(additives)} additives to database '{db_path}'...", INFO, silent_mode=SILENT_MODE)
         conn = sqlite3.connect(db_path)
@@ -104,15 +132,18 @@ class AditivosTools(object):
         # Create tables if not exist
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS additives (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             code TEXT NOT NULL,
             name TEXT NOT NULL,
+            description TEXT,
+            uses TEXT,
+            side_effects TEXT,
             toxicity TEXT NOT NULL
             )
         ''')
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS alt_names (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             additive_id INTEGER NOT NULL,
             lang TEXT NOT NULL,
             alt_name TEXT NOT NULL,
@@ -122,13 +153,15 @@ class AditivosTools(object):
 
         for additive in additives:
             cursor.execute('''
-                INSERT INTO additives (code, name, toxicity, link)
-                VALUES (?, ?, ?)
+                INSERT INTO additives (code, name, description, uses, side_effects, toxicity)
+                VALUES (?, ?, ?, ?, ?, ?)
             ''', (
                 additive['code'],
                 additive['name'],
-                additive['toxicity'],
-                additive['link']
+                additive['description'],
+                additive['uses'],
+                additive['sideEffects'],
+                additive['toxicity']
             ))
             additive_id = cursor.lastrowid
 
